@@ -162,15 +162,8 @@ async def handle_unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # Обработка ошибок
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Ошибка при обработке сообщения: {context.error}")
-    try:
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text="❌ Произошла ошибка при обработке запроса. Попробуйте позже.",
-        )
-    except Exception:
-        pass
 
 
 def setup_bot():
