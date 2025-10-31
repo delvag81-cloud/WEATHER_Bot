@@ -1,19 +1,15 @@
+import asyncio
 from datetime import datetime
 import logging
 import os
-import threading
+from threading import Thread
 
+from aiogram import Bot, Dispatcher, F, types
+from aiogram.filters import Command
+from aiogram.types import Message
 from dotenv import load_dotenv
 from flask import Flask
 import requests
-from telegram import Update
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    ContextTypes,
-    MessageHandler,
-    filters,
-)
 
 
 # Настройка логирования
@@ -33,6 +29,10 @@ if not API_KEY:
     raise ValueError("Не найден API_KEY в переменных окружения (.env)")
 if not BOT_TOKEN:
     raise ValueError("Не найден BOT_TOKEN в переменных окружения (.env)")
+
+# Инициализация бота и диспетчера
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher()
 
 # Создаем Flask приложение для хелс-чека
 app = Flask(__name__)
@@ -102,8 +102,9 @@ def get_weather(city: str = "Saint Petersburg") -> str:
 
 
 # Команда /start
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.message.from_user
+@dp.message(Command("start"))
+async def start_command(message: Message):
+    user = message.from_user
     welcome_text = f"""
 👋 Привет, {user.first_name}!
 
@@ -116,11 +117,12 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 🌍 **Или просто напиши название города,** и я покажу погоду там!
     """
-    await update.message.reply_text(welcome_text)
+    await message.answer(welcome_text)
 
 
 # Команда /help
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+@dp.message(Command("help"))
+async def help_command(message: Message):
     help_text = """
 📖 **Помощь по боту:**
 
@@ -130,63 +132,43 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 🌤️ Бот использует данные OpenWeatherMap
     """
-    await update.message.reply_text(help_text)
+    await message.answer(help_text)
 
 
 # Команда /weather
-async def weather_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+@dp.message(Command("weather"))
+async def weather_command(message: Message):
     """Погода в Санкт-Петербурге по умолчанию"""
     weather_info = get_weather("Saint Petersburg")
-    await update.message.reply_text(weather_info, parse_mode="Markdown")
+    await message.answer(weather_info, parse_mode="Markdown")
 
 
 # Обработка текстовых сообщений с названиями городов
-async def handle_city_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    city = update.message.text
+@dp.message(F.text & ~F.command)
+async def handle_city_message(message: Message):
+    city = message.text
 
     # Показываем, что бот печатает
-    await context.bot.send_chat_action(
-        chat_id=update.effective_chat.id, action="typing"
-    )
+    await bot.send_chat_action(chat_id=message.chat.id, action="typing")
 
     weather_info = get_weather(city)
-    await update.message.reply_text(weather_info, parse_mode="Markdown")
+    await message.answer(weather_info, parse_mode="Markdown")
 
 
 # Обработка неизвестных команд
-async def handle_unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
+@dp.message(F.command)
+async def handle_unknown(message: Message):
+    await message.answer(
         "❓ Извините, я не понимаю эту команду.\n"
         "Используйте /help для просмотра доступных команд."
     )
 
 
 # Обработка ошибок
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    logger.error(f"Ошибка при обработке сообщения: {context.error}")
-
-
-def setup_bot():
-    """Настройка и запуск бота"""
-    application = Application.builder().token(BOT_TOKEN).build()
-
-    # Добавляем обработчики команд
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("weather", weather_command))
-
-    # Обработчик для сообщений с названиями городов (не команд)
-    application.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_city_message)
-    )
-
-    # Обработчик неизвестных команд
-    application.add_handler(MessageHandler(filters.COMMAND, handle_unknown))
-
-    # Обработчик ошибок
-    application.add_error_handler(error_handler)
-
-    return application
+@dp.error()
+async def error_handler(update: types.Update, exception: Exception):
+    logger.error(f"Ошибка при обработке сообщения: {exception}")
+    return True
 
 
 def run_flask():
@@ -195,22 +177,21 @@ def run_flask():
     app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
 
 
-def run_bot():
+async def run_bot():
     """Запуск Telegram бота"""
-    application = setup_bot()
     logger.info("Бот запущен...")
     print("🤖 Бот погоды запущен!")
-    application.run_polling()
+    await dp.start_polling(bot)
 
 
 def main():
     """Основная функция запуска"""
     # Запускаем Flask в отдельном потоке
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread = Thread(target=run_flask, daemon=True)
     flask_thread.start()
 
     # Запускаем бота в основном потоке
-    run_bot()
+    asyncio.run(run_bot())
 
 
 if __name__ == "__main__":
