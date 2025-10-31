@@ -1,9 +1,10 @@
 from datetime import datetime
 import logging
 import os
+import threading
 
 from dotenv import load_dotenv
-from flask import Flask, request
+from flask import Flask
 import requests
 from telegram import Update
 from telegram.ext import (
@@ -27,18 +28,24 @@ load_dotenv()
 # Читаем ключи из переменных окружения
 API_KEY = os.getenv("API_KEY")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-RENDER_EXTERNAL_HOSTNAME = os.getenv("RENDER_EXTERNAL_HOSTNAME")
 
 if not API_KEY:
     raise ValueError("Не найден API_KEY в переменных окружения (.env)")
 if not BOT_TOKEN:
     raise ValueError("Не найден BOT_TOKEN в переменных окружения (.env)")
 
-# Создаем Flask приложение
+# Создаем Flask приложение для хелс-чека
 app = Flask(__name__)
 
-# Глобальная переменная для бота
-bot_application = None
+
+@app.route("/")
+def home():
+    return "🤖 Weather Bot is running! Use Telegram to interact with the bot."
+
+
+@app.route("/health")
+def health():
+    return "✅ Bot is healthy and running!"
 
 
 def get_weather(city: str = "Saint Petersburg") -> str:
@@ -167,7 +174,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def setup_bot():
-    """Настройка бота"""
+    """Настройка и запуск бота"""
     application = Application.builder().token(BOT_TOKEN).build()
 
     # Добавляем обработчики команд
@@ -189,62 +196,28 @@ def setup_bot():
     return application
 
 
-@app.route("/")
-def home():
-    return "🤖 Weather Bot is running! Use Telegram to interact with the bot."
+def run_flask():
+    """Запуск Flask сервера для хелс-чека"""
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
 
 
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    """Эндпоинт для вебхука Telegram"""
-    update = Update.de_json(request.get_json(), bot_application.bot)
-    bot_application.update_queue.put(update)
-    return "ok"
-
-
-@app.route("/set_webhook", methods=["GET"])
-def set_webhook():
-    """Установка вебхука"""
-    webhook_url = f"https://{RENDER_EXTERNAL_HOSTNAME}/webhook"
-
-    try:
-        # Удаляем предыдущий вебхук
-        bot_application.bot.delete_webhook()
-
-        # Устанавливаем новый вебхук
-        success = bot_application.bot.set_webhook(webhook_url)
-
-        if success:
-            return f"✅ Webhook установлен: {webhook_url}"
-        else:
-            return "❌ Ошибка установки webhook"
-    except Exception as e:
-        return f"❌ Ошибка: {str(e)}"
-
-
-@app.route("/remove_webhook", methods=["GET"])
-def remove_webhook():
-    """Удаление вебхука"""
-    try:
-        success = bot_application.bot.delete_webhook()
-        if success:
-            return "✅ Webhook удален"
-        else:
-            return "❌ Ошибка удаления webhook"
-    except Exception as e:
-        return f"❌ Ошибка: {str(e)}"
+def run_bot():
+    """Запуск Telegram бота"""
+    application = setup_bot()
+    logger.info("Бот запущен...")
+    print("🤖 Бот погоды запущен!")
+    application.run_polling()
 
 
 def main():
-    """Запуск бота"""
-    global bot_application
+    """Основная функция запуска"""
+    # Запускаем Flask в отдельном потоке
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
 
-    # Настраиваем бота
-    bot_application = setup_bot()
-
-    # Запускаем Flask приложение
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    # Запускаем бота в основном потоке
+    run_bot()
 
 
 if __name__ == "__main__":
