@@ -173,7 +173,7 @@ async def error_handler(update: types.Update, exception: Exception):
 
 def run_flask():
     """Запуск Flask сервера для хелс-чека"""
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 443))
     app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
 
 
